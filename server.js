@@ -148,6 +148,33 @@ app.post("/register", async (req, res) => {
   }
 });
 
+app.post(
+  "/director/create-admin",
+  authenticateToken,
+  authorizeRoles("director"),
+  async (req, res) => {
+    const { name, phoneNumber, password } = req.body;
+
+    const existing = await User.findOne({ phoneNumber });
+    if (existing) {
+      return res.status(400).json({ error: "User already exists" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const admin = new User({
+      name,
+      phoneNumber,
+      password: hashedPassword,
+      role: "admin"
+    });
+
+    await admin.save();
+
+    res.json({ message: "Admin Created Successfully" });
+  }
+);
+
 // LOGIN (All Roles)
 
 app.post("/login", async (req, res) => {
@@ -273,6 +300,36 @@ app.get(
    DIRECTOR ROUTES
 ================================ */
 
+//CREATE ADMIN
+
+app.post(
+  "/director/create-admin",
+  authenticateToken,
+  authorizeRoles("director"),
+  async (req, res) => {
+    const { name, phoneNumber, password } = req.body;
+
+    const existing = await User.findOne({ phoneNumber });
+    if (existing) {
+      return res.status(400).json({ error: "User already exists" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const admin = new User({
+      name,
+      phoneNumber,
+      password: hashedPassword,
+      role: "admin",
+    });
+
+    await admin.save();
+
+    res.json({ message: "Admin Created Successfully" });
+  }
+);
+
+
 // Add Vehicle
 
 app.post(
@@ -289,11 +346,16 @@ app.post(
 // Add Driver
 
 app.post(
-  "/director/add-driver",
+  "/director/create-driver",
   authenticateToken,
   authorizeRoles("director"),
   async (req, res) => {
     const { name, phoneNumber, password } = req.body;
+
+    const existing = await User.findOne({ phoneNumber });
+    if (existing) {
+      return res.status(400).json({ error: "User already exists" });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -305,18 +367,64 @@ app.post(
     });
 
     await driver.save();
-    res.json({ message: "Driver Added" });
+    res.json({ message: "Driver Created Successfully" });
   }
 );
+
+app.get(
+  "/director/revenue",
+  authenticateToken,
+  authorizeRoles("director"),
+  async (req, res) => {
+    const bookings = await Booking.find({ status: "completed" });
+
+    const totalRevenue = bookings.reduce(
+      (sum, b) => sum + (b.amount || 0),
+      0
+    );
+
+    res.json({
+      totalCompletedTrips: bookings.length,
+      totalRevenue
+    });
+  }
+);
+
+app.put(
+  "/director/update-vehicle/:id",
+  authenticateToken,
+  authorizeRoles("director"),
+  async (req, res) => {
+    await Vehicle.findByIdAndUpdate(
+      req.params.id,
+      req.body
+    );
+
+    res.json({ message: "Vehicle Updated" });
+  }
+);
+
 
 // Get All Users
 
 app.get(
-  "/director/users",
+  "/director/all-users",
   authenticateToken,
   authorizeRoles("director"),
   async (req, res) => {
     const users = await User.find();
     res.json(users);
+  }
+);
+
+//Get All Vehicles
+
+app.get(
+  "/director/vehicles",
+  authenticateToken,
+  authorizeRoles("director"),
+  async (req, res) => {
+    const vehicles = await Vehicle.find();
+    res.json(vehicles);
   }
 );
