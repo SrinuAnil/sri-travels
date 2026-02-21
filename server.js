@@ -4,12 +4,13 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const dotenv = require("dotenv");
-
+const cookieParser = require("cookie-parser");
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(cookieParser());
 
 /* ================================
    DATABASE CONNECTION
@@ -101,7 +102,16 @@ const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   if (!authHeader) return res.status(401).json({ error: "Invalid JWT" });
 
-  const token = authHeader.split(" ")[1];
+  const token =
+    req.cookies.jwt_token || 
+    (req.headers.authorization &&
+     req.headers.authorization.split(" ")[1]);
+
+  console.log("token: ", token)
+
+  if (!token) {
+    return res.status(401).json({ error: "Token missing" });
+  }
 
   jwt.verify(token, "SRI_TRAVELS_SECRET", (err, user) => {
     if (err) return res.status(403).json({ error: "Token Expired" });
@@ -148,32 +158,7 @@ app.post("/register", async (req, res) => {
   }
 });
 
-app.post(
-  "/director/create-admin",
-  authenticateToken,
-  authorizeRoles("director"),
-  async (req, res) => {
-    const { name, phoneNumber, password } = req.body;
 
-    const existing = await User.findOne({ phoneNumber });
-    if (existing) {
-      return res.status(400).json({ error: "User already exists" });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const admin = new User({
-      name,
-      phoneNumber,
-      password: hashedPassword,
-      role: "admin"
-    });
-
-    await admin.save();
-
-    res.json({ message: "Admin Created Successfully" });
-  }
-);
 
 // LOGIN (All Roles)
 
@@ -308,8 +293,10 @@ app.post(
   authorizeRoles("director"),
   async (req, res) => {
     const { name, phoneNumber, password } = req.body;
+    console.log("request: ",req.body)
 
     const existing = await User.findOne({ phoneNumber });
+    console.log(existing)
     if (existing) {
       return res.status(400).json({ error: "User already exists" });
     }
@@ -412,8 +399,54 @@ app.get(
   authenticateToken,
   authorizeRoles("director"),
   async (req, res) => {
-    const users = await User.find();
-    res.json(users);
+    try {
+      const { page = 1, limit = 25, search = "", role = "" } = req.query;
+
+      const query = {};
+
+      // Search by name or phone
+      if (search) {
+        query.$or = [
+          { name: { $regex: search, $options: "i" } },
+          { phoneNumber: { $regex: search, $options: "i" } }
+        ];
+      }
+
+      // Filter by role
+      if (role) {
+        query.role = role;
+      }
+
+      const users = await User.find(query)
+        .skip((page - 1) * limit)
+        .limit(parseInt(limit))
+        .sort({ createdAt: -1 });
+
+      const totalUsers = await User.countDocuments(query);
+
+      res.json({
+        users,
+        totalPages: Math.ceil(totalUsers / limit),
+        currentPage: Number(page)
+      });
+
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+app.put(
+  "/director/toggle-user/:id",
+  authenticateToken,
+  authorizeRoles("director"),
+  async (req, res) => {
+    const user = await User.findById(req.params.id);
+
+    user.isActive = !user.isActive;
+    await user.save();
+
+    res.json({ message: "User status updated" });
   }
 );
 
