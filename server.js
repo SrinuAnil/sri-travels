@@ -66,28 +66,79 @@ const vehicleSchema = new mongoose.Schema({
 // BOOKINGS
 
 const bookingSchema = new mongoose.Schema({
+
+  serviceType: {
+    type: String,
+    enum: ["transport", "ambulance"],
+    required: true
+  },
+
+  bookingType: {
+    type: String,
+    enum: ["self", "other"],
+    required: true
+  },
+
   customerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    required: true,
+    required: true
   },
-  customerName: String,
-  customerPhone: String,
-  vehicleId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Vehicle",
+
+  customerName: {
+    type: String,
+    required: true
   },
-  vehicleType: String,
-  fromLocation: String,
-  toLocation: String,
-  travelDate: Date,
-  amount: Number,
+
+  customerPhone: {
+    type: String,
+    required: true
+  },
+
+  bookingForName: {
+    type: String
+  },
+
+  bookingForPhone: {
+    type: String
+  },
+
+  fromLocation: {
+    address: String,
+    latitude: Number,
+    longitude: Number
+  },
+
+  toLocation: {
+    address: String,
+    latitude: Number,
+    longitude: Number
+  },
+
+  hospitalName: {
+    type: String
+  },
+
+  vehicleType: {
+    type: String // auto, car, suv, ambulance-basic, ambulance-icu etc
+  },
+
   status: {
     type: String,
-    enum: ["pending", "approved", "completed", "cancelled"],
-    default: "pending",
+    enum: ["Pending", "Accepted", "On The Way", "Completed", "Cancelled"],
+    default: "Pending"
   },
-  createdAt: { type: Date, default: Date.now },
+
+  city: {
+    type: String,
+    default: "Tirupati"
+  },
+
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+
 });
 
 const User = mongoose.model("User", userSchema);
@@ -99,15 +150,11 @@ const Booking = mongoose.model("Booking", bookingSchema);
 ================================ */
 
 const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers["authorization"];
-  if (!authHeader) return res.status(401).json({ error: "Invalid JWT" });
 
   const token =
     req.cookies.jwt_token || 
     (req.headers.authorization &&
      req.headers.authorization.split(" ")[1]);
-
-  console.log("token: ", token)
 
   if (!token) {
     return res.status(401).json({ error: "Token missing" });
@@ -187,36 +234,51 @@ app.post("/login", async (req, res) => {
 // Create Booking
 
 app.post(
-  "/book",
+  "/customer/create-booking",
   authenticateToken,
   authorizeRoles("customer"),
   async (req, res) => {
     try {
-      const {
-        vehicleId,
-        vehicleType,
-        fromLocation,
-        toLocation,
-        travelDate,
-        amount,
-      } = req.body;
 
       const user = await User.findById(req.user.id);
 
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const {
+        serviceType,
+        bookingType,
+        bookingForName,
+        bookingForPhone,
+        fromLocation,
+        toLocation,
+        hospitalName,
+        vehicleType
+      } = req.body;
+
       const booking = new Booking({
+        serviceType,
+        bookingType,
         customerId: user._id,
         customerName: user.name,
         customerPhone: user.phoneNumber,
-        vehicleId,
-        vehicleType,
+        bookingForName,
+        bookingForPhone,
         fromLocation,
         toLocation,
-        travelDate,
-        amount,
+        hospitalName,
+        vehicleType,
+        city: "Tirupati"
       });
 
       await booking.save();
-      res.status(201).json({ message: "Booking Created" });
+
+      res.status(201).json({
+        message: "Booking Created Successfully",
+        booking
+      });
+
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -226,12 +288,21 @@ app.post(
 // View Own Bookings
 
 app.get(
-  "/my-bookings",
+  "/customer/my-bookings",
   authenticateToken,
   authorizeRoles("customer"),
   async (req, res) => {
-    const bookings = await Booking.find({ customerId: req.user.id });
-    res.json(bookings);
+    try {
+
+      const bookings = await Booking.find({
+        customerId: req.user.id
+      }).sort({ createdAt: -1 });
+
+      res.json(bookings);
+
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   }
 );
 
@@ -363,7 +434,7 @@ app.get(
   authenticateToken,
   authorizeRoles("director"),
   async (req, res) => {
-    const bookings = await Booking.find({ status: "completed" });
+    const bookings = await Booking.find({ status: "Completed" });
 
     const totalRevenue = bookings.reduce(
       (sum, b) => sum + (b.amount || 0),
