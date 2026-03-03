@@ -39,12 +39,22 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   phoneNumber: { type: String, required: true, unique: true },
   password: { type: String, required: true },
+
   role: {
     type: String,
     enum: ["customer", "admin", "director", "driver"],
     required: true,
   },
+
   isActive: { type: Boolean, default: true },
+
+  // 🚗 Driver live location
+  location: {
+    latitude: { type: Number },
+    longitude: { type: Number },
+    updatedAt: { type: Date }
+  },
+
   createdAt: { type: Date, default: Date.now },
 });
 
@@ -134,6 +144,14 @@ const bookingSchema = new mongoose.Schema({
     default: "Tirupati"
   },
 
+  distance: Number,
+  estimatedTime: Number,
+  fare: Number,
+  assignedDriver: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+  },
+
   createdAt: {
     type: Date,
     default: Date.now
@@ -144,6 +162,73 @@ const bookingSchema = new mongoose.Schema({
 const User = mongoose.model("User", userSchema);
 const Vehicle = mongoose.model("Vehicle", vehicleSchema);
 const Booking = mongoose.model("Booking", bookingSchema);
+
+// Distace Calculation Function
+
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Radius of the Earth in km
+  const toRad = (value) => (value * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // Distance in km
+}
+
+//Fare Calculate Function
+
+function calculateFare(distance, vehicleType) {
+  const baseFare = {
+    auto: 40,
+    car: 80,
+    suv: 120,
+    van: 150,
+    "ambulance-basic": 200,
+    "ambulance-icu": 500,
+  };
+
+  const perKmRate = {
+    auto: 12,
+    car: 18,
+    suv: 22,
+    van: 28,
+    "ambulance-basic": 40,
+    "ambulance-icu": 60,
+  };
+  return baseFare[vehicleType] + (distance * perKmRate[vehicleType]);
+}
+
+//Find Nearest Driver Function
+async function findNearestDriver(lat, lon) {
+  const drivers = await User.find({ role: "driver", isActive: true });
+
+  let nearestDriver = null;
+  let minDistance = Infinity;
+
+  for (let driver of drivers) {
+      if (!driver.location) continue;
+  
+      const distance = calculateDistance(
+        pickupLat,
+        pickupLng,
+        driver.location.latitude,
+        driver.location.longitude
+      );
+  
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearestDriver = driver;
+      }
+    }
+  
+    return nearestDriver;
+  }
 
 /* ================================
    AUTH MIDDLEWARE
@@ -246,9 +331,6 @@ app.post(
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
-
-      console.log(req.body)
-
       const {
         serviceType,
         bookingType,
@@ -259,6 +341,24 @@ app.post(
         hospitalName,
         vehicleType
       } = req.body;
+
+      const distance = calculateDistance(
+        fromLocation.latitude,
+        fromLocation.longitude,
+        toLocation.latitude,
+        toLocation.longitude
+      );
+
+      const estimatedTime = Math.round((distance / 30) * 60); // assume 30km/h avg
+
+      const fare = calculateFare(distance, vehicleType);
+
+      const nearestDriver = await findNearestDriver(
+        fromLocation.latitude,
+        fromLocation.longitude
+      );
+
+
 
       const booking = new Booking({
         serviceType,
@@ -272,18 +372,62 @@ app.post(
         toLocation,
         hospitalName,
         vehicleType,
-        city: "Tirupati"
+        city: "Tirupati",
+        distance,
+        estimatedTime,
+        amount: fare,
+        assignedDriver: nearestDriver ? nearestDriver._id : null,
+        status: nearestDriver ? "Accepted" : "Pending"
       });
-
-      console.log("user: ", user)
-      console.log("req: ",req)
-
 
       await booking.save();
 
       res.status(201).json({
         message: "Booking Created Successfully",
-        booking
+        booking,
+        assignedDriver: nearestDriver ? {
+          name: nearestDriver.name,
+          phoneNumber: nearestDriver.phoneNumber
+        } : null,
+        distance,
+        estimatedTime,
+        fare
+      });
+
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+//charges estimation
+
+app.post(
+  "/customer/estimate-fare",
+  authenticateToken,
+  authorizeRoles("customer"),
+  async (req, res) => {
+    try {
+      const { fromLocation, toLocation, vehicleType } = req.body;
+
+      if (!fromLocation || !toLocation) {
+        return res.status(400).json({ error: "Locations required" });
+      }
+
+      const distance = calculateDistance(
+        fromLocation.latitude,
+        fromLocation.longitude,
+        toLocation.latitude,
+        toLocation.longitude
+      );
+
+      const estimatedTime = Math.round((distance / 30) * 60); // 30km/h avg speed
+      const fare = calculateFare(distance, vehicleType);
+
+      res.json({
+        distance: Number(distance.toFixed(2)),
+        estimatedTime,
+        fare: Math.round(fare),
       });
 
     } catch (err) {
