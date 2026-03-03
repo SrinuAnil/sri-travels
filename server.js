@@ -161,6 +161,7 @@ const authenticateToken = (req, res, next) => {
   }
 
   jwt.verify(token, "SRI_TRAVELS_SECRET", (err, user) => {
+    
     if (err) return res.status(403).json({ error: "Token Expired" });
     req.user = user;
     next();
@@ -236,7 +237,7 @@ app.post("/login", async (req, res) => {
 app.post(
   "/customer/create-booking",
   authenticateToken,
-  authorizeRoles("customer"),
+  authorizeRoles("customer", "admin"),
   async (req, res) => {
     try {
 
@@ -245,6 +246,8 @@ app.post(
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
+
+      console.log(req.body)
 
       const {
         serviceType,
@@ -271,6 +274,10 @@ app.post(
         vehicleType,
         city: "Tirupati"
       });
+
+      console.log("user: ", user)
+      console.log("req: ",req)
+
 
       await booking.save();
 
