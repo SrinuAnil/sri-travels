@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const dotenv = require("dotenv");
+const axios = require("axios");
 const cookieParser = require("cookie-parser");
 dotenv.config();
 
@@ -414,19 +415,64 @@ app.post(
         return res.status(400).json({ error: "Locations required" });
       }
 
-      const distance = calculateDistance(
-        fromLocation.latitude,
-        fromLocation.longitude,
-        toLocation.latitude,
-        toLocation.longitude
+      const origin = `${fromLocation.latitude},${fromLocation.longitude}`;
+      const destination = `${toLocation.latitude},${toLocation.longitude}`
+
+      const response = await axios.get(
+        "https://maps.googleapis.com/maps/api/distancematrix/json",
+        {
+          params: {
+            origins: origin,
+            destinations: destination,
+            key: "AIzaSyAWc-KVC4x1k2pp48EzSyGkjipE9cj03Qg",
+            mode: "driving",
+          },
+        }
       );
 
-      const estimatedTime = Math.round((distance / 30) * 60); // 30km/h avg speed
-      const fare = calculateFare(distance, vehicleType);
+      const data = response.data;
+
+      if (
+        data.rows[0].elements[0].status !== "OK"
+      ) {
+        return res.status(400).json({ error: "Route not found" });
+      }
+
+      const distanceMeters =
+        data.rows[0].elements[0].distance.value;
+
+      const durationSeconds =
+        data.rows[0].elements[0].duration.value;
+
+      const distanceKm = distanceMeters / 1000;
+      const durationMinutes = Math.ceil(durationSeconds / 60);
+
+      // Fare logic
+      const baseFare = {
+    auto: 40,
+    car: 80,
+    suv: 120,
+    van: 150,
+    "ambulance-basic": 200,
+    "ambulance-icu": 500,
+  };
+
+  const perKm = {
+    auto: 12,
+    car: 18,
+    suv: 22,
+    van: 28,
+    "ambulance-basic": 40,
+    "ambulance-icu": 60,
+  };
+
+      const fare =
+        baseFare[vehicleType] +
+        distanceKm * perKm[vehicleType];
 
       res.json({
-        distance: Number(distance.toFixed(2)),
-        estimatedTime,
+        distance: Number(distanceKm.toFixed(2)),
+        estimatedTime: durationMinutes,
         fare: Math.round(fare),
       });
 
