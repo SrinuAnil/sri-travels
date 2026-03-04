@@ -424,7 +424,7 @@ app.post(
           params: {
             origins: origin,
             destinations: destination,
-            key: "AIzaSyAWc-KVC4x1k2pp48EzSyGkjipE9cj03Qg",
+            key: process.env.GOOGLE_MAPS_API_KEY,
             mode: "driving",
           },
         }
