@@ -269,6 +269,10 @@ const authorizeRoles = (...roles) => {
 
 // REGISTER (Customer Only)
 
+app.get("/", async (req,res) => {
+  return res.json({message: "Welcome to Sri Travels API"})
+})
+
 app.post("/register", async (req, res) => {
   try {
     const { name, phoneNumber, password } = req.body;
@@ -410,7 +414,7 @@ app.post(
   async (req, res) => {
     try {
       const { fromLocation, toLocation, vehicleType } = req.body;
-
+      
       if (!fromLocation || !toLocation) {
         return res.status(400).json({ error: "Locations required" });
       }
@@ -432,6 +436,7 @@ app.post(
 
       const data = response.data;
 
+      console.log("req", req.body, "data", data)
       if (
         data.rows[0].elements[0].status !== "OK"
       ) {
@@ -477,7 +482,8 @@ app.post(
       });
 
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      console.log("Error:", err)
+      res.status(500).json({ error: err });
     }
   }
 );
