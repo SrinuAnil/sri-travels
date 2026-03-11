@@ -1,4 +1,5 @@
 const express = require("express");
+const http = require("http");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
@@ -6,12 +7,36 @@ const bcrypt = require("bcryptjs");
 const dotenv = require("dotenv");
 const axios = require("axios");
 const cookieParser = require("cookie-parser");
+const { Server } = require("socket.io");
+
 dotenv.config();
 
 const app = express();
+const server = http.createServer(app);
+
 app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
+
+const io = new Server(server, {
+  cors: {
+    origin: "*"
+  }
+});
+
+io.on("connection", (socket) => {
+
+  console.log("Socket connected");
+
+  socket.on("driver-online", (driverId) => {
+
+    socket.join(driverId);
+
+    console.log("Driver online:", driverId);
+
+  });
+
+});
 
 /* ================================
    DATABASE CONNECTION
@@ -21,14 +46,17 @@ const uri = process.env.MONGO_URI;
 const PORT = process.env.PORT || 3001;
 
 mongoose
-  .connect(uri)
-  .then(() => {
-    console.log("Connected to Sri Travels DB");
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  })
-  .catch((err) => console.log("Error connecting to MongoDB Atlas:", err));
+.connect(process.env.MONGO_URI)
+.then(() => {
+
+  console.log("Connected to Sri Travels DB");
+
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log("Server running on port", PORT);
+  });
+
+})
+.catch(err => console.log(err));
 
 /* ================================
    SCHEMAS
@@ -54,6 +82,12 @@ const userSchema = new mongoose.Schema({
     latitude: { type: Number },
     longitude: { type: Number },
     updatedAt: { type: Date }
+  },
+
+  driverStatus: {
+    type: String,
+    enum: ["available", "busy", "offline"],
+    default: "offline"
   },
 
   createdAt: { type: Date, default: Date.now },
@@ -207,29 +241,39 @@ function calculateFare(distance, vehicleType) {
 
 //Find Nearest Driver Function
 async function findNearestDriver(lat, lon) {
-  const drivers = await User.find({ role: "driver", isActive: true });
+
+  const drivers = await User.find({
+    role: "driver",
+    driverStatus: "available",
+    isActive: true
+  });
 
   let nearestDriver = null;
   let minDistance = Infinity;
 
   for (let driver of drivers) {
-      if (!driver.location) continue;
-  
-      const distance = calculateDistance(
-        pickupLat,
-        pickupLng,
-        driver.location.latitude,
-        driver.location.longitude
-      );
-  
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearestDriver = driver;
-      }
+
+    if (!driver.location) continue;
+
+    const distance = calculateDistance(
+      lat,
+      lon,
+      driver.location.latitude,
+      driver.location.longitude
+    );
+
+    if (distance < minDistance) {
+
+      minDistance = distance;
+      nearestDriver = driver;
+
     }
-  
-    return nearestDriver;
+
   }
+
+  return nearestDriver;
+}
+
 
 /* ================================
    AUTH MIDDLEWARE
@@ -387,6 +431,13 @@ app.post(
 
       await booking.save();
 
+      if (nearestDriver) {
+
+        io.to(nearestDriver._id.toString())
+          .emit("new-booking", booking);
+
+      }
+
       res.status(201).json({
         message: "Booking Created Successfully",
         booking,
@@ -455,11 +506,11 @@ app.post(
       // Fare logic
       const baseFare = {
     auto: 40,
-    car: 80,
-    suv: 120,
-    van: 150,
-    "ambulance-basic": 200,
-    "ambulance-icu": 500,
+    car: 10,
+    suv: 150,
+    van: 200,
+    "ambulance-basic": 800,
+    "ambulance-icu": 1500,
   };
 
   const perKm = {
@@ -508,6 +559,46 @@ app.get(
     }
   }
 );
+
+/* ================================
+   DRIVER ROUTES
+================================ */
+
+app.post(
+  "/driver/update-location",
+  authenticateToken,
+  authorizeRoles("driver"),
+  async (req, res) => {
+    const { latitude, longitude } = req.body;
+
+    await User.findByIdAndUpdate(
+      req.user.id,
+      {
+        location: {
+          latitude,
+          longitude,
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    res.json({ message: "Location updated" });
+  }
+);
+
+app.put(
+  "/driver/status",
+  authenticateToken,
+  authorizeRoles("driver"),
+  async (req, res) => {
+    const { status } = req.body;
+    await User.findByIdAndUpdate(
+      req.user.id,
+      { driverStatus: status }
+    )
+
+    res.json({ message: "Status updated" });
+  })
 
 /* ================================
    ADMIN ROUTES
