@@ -8,6 +8,7 @@ const dotenv = require("dotenv");
 const axios = require("axios");
 const cookieParser = require("cookie-parser");
 const { Server } = require("socket.io");
+const { log } = require("console");
 
 dotenv.config();
 
@@ -244,14 +245,17 @@ async function findNearestDriver(lat, lon) {
 
   const drivers = await User.find({
     role: "driver",
-    driverStatus: "available",
+    // driverStatus: "available",
     isActive: true
   });
+
+  console.log("Available drivers:", drivers, drivers);
 
   let nearestDriver = null;
   let minDistance = Infinity;
 
   for (let driver of drivers) {
+    console.log("Checking driver:", driver.name, "Location:", driver.location)
 
     if (!driver.location) continue;
 
@@ -282,16 +286,14 @@ async function findNearestDriver(lat, lon) {
 const authenticateToken = (req, res, next) => {
 
   const token =
-    req.cookies.jwt_token || 
     (req.headers.authorization &&
-     req.headers.authorization.split(" ")[1]);
-
+     req.headers.authorization.split(" ")[1]) || req.cookies.jwt_token;
   if (!token) {
     return res.status(401).json({ error: "Token missing" });
   }
 
   jwt.verify(token, "SRI_TRAVELS_SECRET", (err, user) => {
-    
+
     if (err) return res.status(403).json({ error: "Token Expired" });
     req.user = user;
     next();
@@ -424,15 +426,16 @@ app.post(
         city: "Tirupati",
         distance,
         estimatedTime,
-        amount: fare,
+        fare,
         assignedDriver: nearestDriver ? nearestDriver._id : null,
         status: nearestDriver ? "Accepted" : "Pending"
       });
 
       await booking.save();
+      console.log("Nearest driver:", nearestDriver);
 
       if (nearestDriver) {
-
+        console.log("Notifying driver:", nearestDriver.name, "about new booking:", booking);
         io.to(nearestDriver._id.toString())
           .emit("new-booking", booking);
 
@@ -487,7 +490,6 @@ app.post(
 
       const data = response.data;
 
-      console.log("req", req.body, "data", data)
       if (
         data.rows[0].elements[0].status !== "OK"
       ) {
@@ -592,10 +594,11 @@ app.put(
   authorizeRoles("driver"),
   async (req, res) => {
     const { status } = req.body;
-    await User.findByIdAndUpdate(
+    const response = await User.findByIdAndUpdate(
       req.user.id,
       { driverStatus: status }
     )
+    console.log("Driver status update response:", response)
 
     res.json({ message: "Status updated" });
   })
